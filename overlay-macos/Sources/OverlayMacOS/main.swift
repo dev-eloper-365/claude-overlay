@@ -95,7 +95,7 @@ final class KeybindSettings {
     static func keyName(for keyCode: UInt16, modifiers: UInt) -> String {
         let modStr = modifierString(for: modifiers)
         let keyStr = keyName(for: keyCode)
-        return modStr.isEmpty ? keyStr : "\(modStr)\(keyStr)"
+        return modStr.isEmpty ? keyStr : "\(modStr) + \(keyStr)"
     }
 
     /// Returns the NSButton keyEquivalent string for a key code.
@@ -165,7 +165,7 @@ final class KeybindSettings {
     static func shortLabel(for keyCode: UInt16, modifiers: UInt) -> String {
         let modStr = modifierString(for: modifiers)
         let keyStr = shortLabel(for: keyCode)
-        return modStr.isEmpty ? keyStr : "\(modStr)\(keyStr)"
+        return modStr.isEmpty ? keyStr : "\(modStr) + \(keyStr)"
     }
 }
 
@@ -796,8 +796,9 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
         rebuildUI(for: prompt)
         moveToTopCenterOfActiveScreen()
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        // Show the panel on top of everything WITHOUT stealing focus
+        // The global key monitor will handle shortcuts even when not focused
+        panel.orderFront(nil)
         panel.orderFrontRegardless()
     }
 
