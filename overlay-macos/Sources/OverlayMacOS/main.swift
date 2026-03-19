@@ -1,6 +1,426 @@
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 import Network
+
+// MARK: - Keybind Settings
+
+final class KeybindSettings {
+    static let shared = KeybindSettings()
+
+    private let defaults = UserDefaults.standard
+    private let approveKeyKey = "approveKeyCode"
+    private let denyKeyKey = "denyKeyCode"
+    private let approveLabelKey = "approveKeyLabel"
+    private let denyLabelKey = "denyKeyLabel"
+    private let approveModifiersKey = "approveModifiers"
+    private let denyModifiersKey = "denyModifiers"
+
+    var approveKeyCode: UInt16 {
+        get {
+            // Use object(forKey:) to distinguish between "key not set" and "key set to 0 (A)"
+            if defaults.object(forKey: approveKeyKey) != nil {
+                return UInt16(defaults.integer(forKey: approveKeyKey))
+            }
+            return UInt16(kVK_Return)
+        }
+        set { defaults.set(Int(newValue), forKey: approveKeyKey); NotificationCenter.default.post(name: .keybindsChanged, object: nil) }
+    }
+
+    var denyKeyCode: UInt16 {
+        get {
+            if defaults.object(forKey: denyKeyKey) != nil {
+                return UInt16(defaults.integer(forKey: denyKeyKey))
+            }
+            return UInt16(kVK_Escape)
+        }
+        set { defaults.set(Int(newValue), forKey: denyKeyKey); NotificationCenter.default.post(name: .keybindsChanged, object: nil) }
+    }
+
+    var approveLabel: String {
+        get { defaults.string(forKey: approveLabelKey) ?? "Return ↵" }
+        set { defaults.set(newValue, forKey: approveLabelKey) }
+    }
+
+    var denyLabel: String {
+        get { defaults.string(forKey: denyLabelKey) ?? "Escape ⎋" }
+        set { defaults.set(newValue, forKey: denyLabelKey) }
+    }
+
+    var approveModifiers: UInt {
+        get { UInt(defaults.integer(forKey: approveModifiersKey)) }
+        set { defaults.set(Int(newValue), forKey: approveModifiersKey); NotificationCenter.default.post(name: .keybindsChanged, object: nil) }
+    }
+
+    var denyModifiers: UInt {
+        get { UInt(defaults.integer(forKey: denyModifiersKey)) }
+        set { defaults.set(Int(newValue), forKey: denyModifiersKey); NotificationCenter.default.post(name: .keybindsChanged, object: nil) }
+    }
+
+    static func modifierString(for modifiers: UInt) -> String {
+        var result = ""
+        if modifiers & UInt(NSEvent.ModifierFlags.control.rawValue) != 0 { result += "⌃" }
+        if modifiers & UInt(NSEvent.ModifierFlags.option.rawValue) != 0 { result += "⌥" }
+        if modifiers & UInt(NSEvent.ModifierFlags.shift.rawValue) != 0 { result += "⇧" }
+        if modifiers & UInt(NSEvent.ModifierFlags.command.rawValue) != 0 { result += "⌘" }
+        return result
+    }
+
+    static func keyName(for keyCode: UInt16) -> String {
+        let names: [UInt16: String] = [
+            UInt16(kVK_Return): "Return ↵",
+            UInt16(kVK_Escape): "Escape ⎋",
+            UInt16(kVK_Space): "Space ␣",
+            UInt16(kVK_Tab): "Tab ⇥",
+            UInt16(kVK_Delete): "Delete ⌫",
+            UInt16(kVK_ANSI_A): "A", UInt16(kVK_ANSI_B): "B", UInt16(kVK_ANSI_C): "C",
+            UInt16(kVK_ANSI_D): "D", UInt16(kVK_ANSI_E): "E", UInt16(kVK_ANSI_F): "F",
+            UInt16(kVK_ANSI_G): "G", UInt16(kVK_ANSI_H): "H", UInt16(kVK_ANSI_I): "I",
+            UInt16(kVK_ANSI_J): "J", UInt16(kVK_ANSI_K): "K", UInt16(kVK_ANSI_L): "L",
+            UInt16(kVK_ANSI_M): "M", UInt16(kVK_ANSI_N): "N", UInt16(kVK_ANSI_O): "O",
+            UInt16(kVK_ANSI_P): "P", UInt16(kVK_ANSI_Q): "Q", UInt16(kVK_ANSI_R): "R",
+            UInt16(kVK_ANSI_S): "S", UInt16(kVK_ANSI_T): "T", UInt16(kVK_ANSI_U): "U",
+            UInt16(kVK_ANSI_V): "V", UInt16(kVK_ANSI_W): "W", UInt16(kVK_ANSI_X): "X",
+            UInt16(kVK_ANSI_Y): "Y", UInt16(kVK_ANSI_Z): "Z",
+            UInt16(kVK_ANSI_1): "1", UInt16(kVK_ANSI_2): "2", UInt16(kVK_ANSI_3): "3",
+            UInt16(kVK_ANSI_4): "4", UInt16(kVK_ANSI_5): "5", UInt16(kVK_ANSI_6): "6",
+            UInt16(kVK_ANSI_7): "7", UInt16(kVK_ANSI_8): "8", UInt16(kVK_ANSI_9): "9",
+            UInt16(kVK_ANSI_0): "0",
+            UInt16(kVK_F1): "F1", UInt16(kVK_F2): "F2", UInt16(kVK_F3): "F3",
+            UInt16(kVK_F4): "F4", UInt16(kVK_F5): "F5", UInt16(kVK_F6): "F6",
+        ]
+        return names[keyCode] ?? "Key \(keyCode)"
+    }
+
+    static func keyName(for keyCode: UInt16, modifiers: UInt) -> String {
+        let modStr = modifierString(for: modifiers)
+        let keyStr = keyName(for: keyCode)
+        return modStr.isEmpty ? keyStr : "\(modStr)\(keyStr)"
+    }
+
+    /// Returns the NSButton keyEquivalent string for a key code.
+    /// For special keys (F-keys, etc), returns empty string since they can't be keyEquivalents.
+    static func keyEquivalent(for keyCode: UInt16) -> String {
+        switch Int(keyCode) {
+        case kVK_Return: return "\r"
+        case kVK_Escape: return "\u{1b}"
+        case kVK_Space: return " "
+        case kVK_Tab: return "\t"
+        case kVK_Delete: return "\u{7f}"
+        case kVK_ANSI_A: return "a"
+        case kVK_ANSI_B: return "b"
+        case kVK_ANSI_C: return "c"
+        case kVK_ANSI_D: return "d"
+        case kVK_ANSI_E: return "e"
+        case kVK_ANSI_F: return "f"
+        case kVK_ANSI_G: return "g"
+        case kVK_ANSI_H: return "h"
+        case kVK_ANSI_I: return "i"
+        case kVK_ANSI_J: return "j"
+        case kVK_ANSI_K: return "k"
+        case kVK_ANSI_L: return "l"
+        case kVK_ANSI_M: return "m"
+        case kVK_ANSI_N: return "n"
+        case kVK_ANSI_O: return "o"
+        case kVK_ANSI_P: return "p"
+        case kVK_ANSI_Q: return "q"
+        case kVK_ANSI_R: return "r"
+        case kVK_ANSI_S: return "s"
+        case kVK_ANSI_T: return "t"
+        case kVK_ANSI_U: return "u"
+        case kVK_ANSI_V: return "v"
+        case kVK_ANSI_W: return "w"
+        case kVK_ANSI_X: return "x"
+        case kVK_ANSI_Y: return "y"
+        case kVK_ANSI_Z: return "z"
+        case kVK_ANSI_0: return "0"
+        case kVK_ANSI_1: return "1"
+        case kVK_ANSI_2: return "2"
+        case kVK_ANSI_3: return "3"
+        case kVK_ANSI_4: return "4"
+        case kVK_ANSI_5: return "5"
+        case kVK_ANSI_6: return "6"
+        case kVK_ANSI_7: return "7"
+        case kVK_ANSI_8: return "8"
+        case kVK_ANSI_9: return "9"
+        default: return "" // F-keys and others don't have simple keyEquivalents
+        }
+    }
+
+    /// Returns a short label for a key (without symbols), suitable for button titles
+    static func shortLabel(for keyCode: UInt16) -> String {
+        switch Int(keyCode) {
+        case kVK_Return: return "Return"
+        case kVK_Escape: return "Esc"
+        case kVK_Space: return "Space"
+        case kVK_Tab: return "Tab"
+        case kVK_Delete: return "Delete"
+        default:
+            let name = keyName(for: keyCode)
+            // Strip any symbols at the end
+            return name.components(separatedBy: " ").first ?? name
+        }
+    }
+
+    static func shortLabel(for keyCode: UInt16, modifiers: UInt) -> String {
+        let modStr = modifierString(for: modifiers)
+        let keyStr = shortLabel(for: keyCode)
+        return modStr.isEmpty ? keyStr : "\(modStr)\(keyStr)"
+    }
+}
+
+extension Notification.Name {
+    static let keybindsChanged = Notification.Name("keybindsChanged")
+}
+
+// MARK: - Menu Bar Controller
+
+final class MenuBarController {
+    /// Shared state to indicate if the settings window is capturing a key
+    static var isCapturingKey = false
+
+    private var statusItem: NSStatusItem!
+    private var settingsWindow: NSWindow?
+    private var approveField: NSTextField?
+    private var denyField: NSTextField?
+    private var capturingField: String? // "approve" or "deny"
+    private var keyMonitor: Any?
+
+    init() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "shield.checkered", accessibilityDescription: "Claude Overlay")
+                ?? NSImage(named: NSImage.lockLockedTemplateName)
+            button.image?.size = NSSize(width: 18, height: 18)
+            button.image?.isTemplate = true
+        }
+        rebuildMenu()
+        NotificationCenter.default.addObserver(forName: .keybindsChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.rebuildMenu()
+        }
+    }
+
+    private func rebuildMenu() {
+        let menu = NSMenu()
+        let settings = KeybindSettings.shared
+
+        let header = NSMenuItem(title: "Claude Overlay", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(NSMenuItem.separator())
+
+        let allow = NSMenuItem(title: "Allow:  \(settings.approveLabel)", action: nil, keyEquivalent: "")
+        allow.isEnabled = false
+        menu.addItem(allow)
+
+        let deny = NSMenuItem(title: "Deny:   \(settings.denyLabel)", action: nil, keyEquivalent: "")
+        deny.isEnabled = false
+        menu.addItem(deny)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let settingsItem = NSMenuItem(title: "Shortcuts…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(quit)
+
+        statusItem.menu = menu
+    }
+
+    @objc private func openSettings() {
+        if let w = settingsWindow, w.isVisible {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let settings = KeybindSettings.shared
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 180),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        w.title = "Shortcut Settings"
+        w.center()
+        w.isReleasedWhenClosed = false
+
+        let container = NSView(frame: w.contentView!.bounds)
+        container.autoresizingMask = [.width, .height]
+        w.contentView = container
+
+        // Allow shortcut
+        let approveTitle = NSTextField(labelWithString: "Allow:")
+        approveTitle.font = .systemFont(ofSize: 13, weight: .medium)
+        approveTitle.frame = NSRect(x: 20, y: 130, width: 80, height: 20)
+        container.addSubview(approveTitle)
+
+        let approveBtn = makeKeyButton(label: settings.approveLabel, x: 110, y: 125)
+        approveBtn.target = self
+        approveBtn.action = #selector(captureApproveKey)
+        approveField = approveBtn
+        container.addSubview(approveBtn)
+
+        // Deny shortcut
+        let denyTitle = NSTextField(labelWithString: "Deny:")
+        denyTitle.font = .systemFont(ofSize: 13, weight: .medium)
+        denyTitle.frame = NSRect(x: 20, y: 90, width: 80, height: 20)
+        container.addSubview(denyTitle)
+
+        let denyBtn = makeKeyButton(label: settings.denyLabel, x: 110, y: 85)
+        denyBtn.target = self
+        denyBtn.action = #selector(captureDenyKey)
+        denyField = denyBtn
+        container.addSubview(denyBtn)
+
+        // Reset button
+        let resetBtn = NSButton(title: "Reset to Defaults", target: self, action: #selector(resetDefaults))
+        resetBtn.bezelStyle = .rounded
+        resetBtn.frame = NSRect(x: 20, y: 20, width: 140, height: 30)
+        container.addSubview(resetBtn)
+
+        // Hint
+        let hint = NSTextField(labelWithString: "Click a field, then press any key")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        hint.frame = NSRect(x: 20, y: 55, width: 280, height: 16)
+        container.addSubview(hint)
+
+        // Clean up capture state when window closes
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: w,
+            queue: .main
+        ) { [weak self] _ in
+            self?.cleanupCapture()
+        }
+
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow = w
+    }
+
+    private func cleanupCapture() {
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        capturingField = nil
+        MenuBarController.isCapturingKey = false
+    }
+
+    private func makeKeyButton(label: String, x: CGFloat, y: CGFloat) -> NSTextField {
+        let field = NSTextField(string: label)
+        field.isEditable = false
+        field.isBordered = true
+        field.isSelectable = false
+        field.bezelStyle = .roundedBezel
+        field.alignment = .center
+        field.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
+        field.frame = NSRect(x: x, y: y, width: 180, height: 30)
+        field.focusRingType = .exterior
+
+        let click = NSClickGestureRecognizer(target: self, action: #selector(fieldClicked(_:)))
+        field.addGestureRecognizer(click)
+        return field
+    }
+
+    @objc private func fieldClicked(_ sender: NSClickGestureRecognizer) {
+        guard let field = sender.view as? NSTextField else { return }
+        if field === approveField {
+            startCapture(for: "approve")
+        } else if field === denyField {
+            startCapture(for: "deny")
+        }
+    }
+
+    @objc private func captureApproveKey() { startCapture(for: "approve") }
+    @objc private func captureDenyKey() { startCapture(for: "deny") }
+
+    private func startCapture(for field: String) {
+        capturingField = field
+        MenuBarController.isCapturingKey = true
+        let target = field == "approve" ? approveField : denyField
+        target?.stringValue = "Press a key…"
+        target?.textColor = .systemBlue
+
+        // Remove old monitor
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleCapturedKey(event)
+            return nil // swallow the event
+        }
+    }
+
+    private func handleCapturedKey(_ event: NSEvent) {
+        guard let field = capturingField else { return }
+        let code = event.keyCode
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue
+        let name = KeybindSettings.keyName(for: code, modifiers: UInt(modifiers))
+        let settings = KeybindSettings.shared
+
+        // Prevent assigning the same key+modifiers to both Allow and Deny
+        if field == "approve" && code == settings.denyKeyCode && modifiers == settings.denyModifiers {
+            shakeField(approveField)
+            return
+        } else if field == "deny" && code == settings.approveKeyCode && modifiers == settings.approveModifiers {
+            shakeField(denyField)
+            return
+        }
+
+        if field == "approve" {
+            settings.approveKeyCode = code
+            settings.approveModifiers = UInt(modifiers)
+            settings.approveLabel = name
+            approveField?.stringValue = name
+            approveField?.textColor = .labelColor
+        } else {
+            settings.denyKeyCode = code
+            settings.denyModifiers = UInt(modifiers)
+            settings.denyLabel = name
+            denyField?.stringValue = name
+            denyField?.textColor = .labelColor
+        }
+
+        capturingField = nil
+        MenuBarController.isCapturingKey = false
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+    }
+
+    private func shakeField(_ field: NSTextField?) {
+        guard let field = field else { return }
+        let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        animation.duration = 0.4
+        animation.values = [-8, 8, -6, 6, -4, 4, -2, 2, 0]
+        field.layer?.add(animation, forKey: "shake")
+        field.stringValue = "Already in use!"
+        field.textColor = .systemRed
+
+        // Reset after a moment
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.capturingField != nil else { return }
+            field.stringValue = "Press a key…"
+            field.textColor = .systemBlue
+        }
+    }
+
+    @objc private func resetDefaults() {
+        let settings = KeybindSettings.shared
+        settings.approveKeyCode = UInt16(kVK_Return)
+        settings.approveModifiers = 0
+        settings.approveLabel = "Return ↵"
+        settings.denyKeyCode = UInt16(kVK_Escape)
+        settings.denyModifiers = 0
+        settings.denyLabel = "Escape ⎋"
+        approveField?.stringValue = settings.approveLabel
+        denyField?.stringValue = settings.denyLabel
+        approveField?.textColor = .labelColor
+        denyField?.textColor = .labelColor
+    }
+}
 
 // MARK: - Data Models
 
@@ -264,18 +684,32 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
 
     private var localKeyMonitor: Any?
     private var globalKeyMonitor: Any?
+    private var keybindObserver: Any?
     private var currentPrompt: PromptData?
     private var onDecision: ((String, String, [String]?, String?) -> Void)?
+
+    /// Time when the overlay was shown - used for grace period
+    private var showTime: Date?
+    /// Grace period in seconds before accepting keyboard shortcuts (prevents accidental triggers while typing)
+    private let gracePeriod: TimeInterval = 0.4
 
     override init() {
         super.init()
         setupPanel()
         setupKeyHandling()
+
+        // Listen for keybind changes to update button titles
+        keybindObserver = NotificationCenter.default.addObserver(
+            forName: .keybindsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.updateButtonKeyEquivalents()
+        }
     }
 
     deinit {
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let keybindObserver { NotificationCenter.default.removeObserver(keybindObserver) }
     }
 
     private func setupPanel() {
@@ -357,6 +791,7 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
     func show(prompt: PromptData, onDecision: @escaping (String, String, [String]?, String?) -> Void) {
         self.currentPrompt = prompt
         self.onDecision = onDecision
+        self.showTime = Date()  // Start grace period
 
         rebuildUI(for: prompt)
         moveToTopCenterOfActiveScreen()
@@ -369,6 +804,7 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
     func hide() {
         panel.orderOut(nil)
         currentPrompt = nil
+        showTime = nil
     }
 
     private func rebuildUI(for prompt: PromptData) {
@@ -458,15 +894,19 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
     }
 
     private func buildBinaryUI() {
+        let settings = KeybindSettings.shared
+
         approveButton.bezelStyle = .rounded
         approveButton.controlSize = .large
-        approveButton.keyEquivalent = "\r"
+        approveButton.title = "Allow (\(KeybindSettings.shortLabel(for: settings.approveKeyCode, modifiers: settings.approveModifiers)))"
+        approveButton.keyEquivalent = KeybindSettings.keyEquivalent(for: settings.approveKeyCode)
         approveButton.target = self
         approveButton.action = #selector(approveAction)
 
         denyButton.bezelStyle = .rounded
         denyButton.controlSize = .large
-        denyButton.keyEquivalent = "\u{1b}"
+        denyButton.title = "Don't Allow (\(KeybindSettings.shortLabel(for: settings.denyKeyCode, modifiers: settings.denyModifiers)))"
+        denyButton.keyEquivalent = KeybindSettings.keyEquivalent(for: settings.denyKeyCode)
         denyButton.target = self
         denyButton.action = #selector(denyAction)
 
@@ -634,24 +1074,34 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
     }
 
     private func setupKeyHandling() {
+        let settings = KeybindSettings.shared
+
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel.isVisible, let prompt = self.currentPrompt else {
                 return event
             }
 
-            // Only handle Enter/Esc for binary mode here; other modes use button key equivalents
+            // Don't process if settings window is capturing a key
+            if MenuBarController.isCapturingKey {
+                return event
+            }
+
+            // Grace period: ignore keys for a short time after overlay appears
+            if let showTime = self.showTime, Date().timeIntervalSince(showTime) < self.gracePeriod {
+                return event
+            }
+
             if prompt.promptType == .binary {
-                switch event.keyCode {
-                case 36, 49: // Enter, Space
+                let code = event.keyCode
+                let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue
+                if code == settings.approveKeyCode && UInt(modifiers) == settings.approveModifiers {
                     self.onDecision?(prompt.requestId, "approved", nil, nil)
                     self.hide()
                     return nil
-                case 53: // Escape
+                } else if code == settings.denyKeyCode && UInt(modifiers) == settings.denyModifiers {
                     self.onDecision?(prompt.requestId, "denied", nil, nil)
                     self.hide()
                     return nil
-                default:
-                    break
                 }
             }
             return event
@@ -662,20 +1112,30 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
                 return
             }
 
+            // Don't process if settings window is capturing a key
+            if MenuBarController.isCapturingKey {
+                return
+            }
+
+            // Grace period: ignore keys for a short time after overlay appears
+            // This prevents accidental triggers when the user is typing in another app
+            if let showTime = self.showTime, Date().timeIntervalSince(showTime) < self.gracePeriod {
+                return
+            }
+
             if prompt.promptType == .binary {
-                switch event.keyCode {
-                case 36, 49: // Enter, Space
+                let code = event.keyCode
+                let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue
+                if code == settings.approveKeyCode && UInt(modifiers) == settings.approveModifiers {
                     DispatchQueue.main.async {
                         self.onDecision?(prompt.requestId, "approved", nil, nil)
                         self.hide()
                     }
-                case 53: // Escape
+                } else if code == settings.denyKeyCode && UInt(modifiers) == settings.denyModifiers {
                     DispatchQueue.main.async {
                         self.onDecision?(prompt.requestId, "denied", nil, nil)
                         self.hide()
                     }
-                default:
-                    break
                 }
             }
         }
@@ -792,6 +1252,14 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
         hide()
     }
 
+    private func updateButtonKeyEquivalents() {
+        let settings = KeybindSettings.shared
+        approveButton.title = "Allow (\(KeybindSettings.shortLabel(for: settings.approveKeyCode, modifiers: settings.approveModifiers)))"
+        approveButton.keyEquivalent = KeybindSettings.keyEquivalent(for: settings.approveKeyCode)
+        denyButton.title = "Don't Allow (\(KeybindSettings.shortLabel(for: settings.denyKeyCode, modifiers: settings.denyModifiers)))"
+        denyButton.keyEquivalent = KeybindSettings.keyEquivalent(for: settings.denyKeyCode)
+    }
+
     private func shakePanel() {
         let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
         animation.timingFunction = CAMediaTimingFunction(name: .linear)
@@ -824,10 +1292,12 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var client: JsonRpcSocketClient?
     private let panel = OverlayPanelController()
+    private var menuBar: MenuBarController?
     private let autoDecision = ProcessInfo.processInfo.environment["OVERLAY_AUTO_DECISION"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        menuBar = MenuBarController()
 
         let uid = getuid()
         let socket = ProcessInfo.processInfo.environment["OVERLAY_SOCKET"] ?? "/tmp/claude-overlay-\(uid).sock"
