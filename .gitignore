@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.build/
+*.o
+*.a
+
+# macOS
+.DS_Store
+*.swp
+
+# Logs
+*.log
+
+# Temp files
+/tmp/
+*.pid
+*.sock
+
+# IDE
+.idea/
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+
+# Secrets
+*.key
+.env
