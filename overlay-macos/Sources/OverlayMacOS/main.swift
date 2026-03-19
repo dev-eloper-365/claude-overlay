@@ -335,8 +335,10 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
         // Detail label
         detailLabel.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .medium)
         detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingMiddle
-        detailLabel.maximumNumberOfLines = 2
+        detailLabel.lineBreakMode = .byCharWrapping
+        detailLabel.maximumNumberOfLines = 6
+        detailLabel.preferredMaxLayoutWidth = 440
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Queue label
         queueLabel.font = NSFont.systemFont(ofSize: 11)
@@ -621,7 +623,7 @@ final class OverlayPanelController: NSObject, NSTextFieldDelegate {
         contentStack.layoutSubtreeIfNeeded()
         let contentSize = contentStack.fittingSize
         let newHeight = contentSize.height + 44 // padding
-        let newWidth = max(480, contentSize.width + 40)
+        let newWidth = min(600, max(480, contentSize.width + 40))
 
         var frame = panel.frame
         let heightDiff = newHeight - frame.height

@@ -54,6 +54,14 @@ check_claude() {
     fi
 }
 
+check_jq() {
+    if command -v jq &>/dev/null; then
+        success "jq found (will auto-merge settings)"
+    else
+        warn "jq not found — hook may need manual settings.json merge (brew install jq)"
+    fi
+}
+
 install_source() {
     info "Installing to ${INSTALL_DIR}..."
 
@@ -234,28 +242,56 @@ configure_hook() {
     # Make hook executable
     chmod +x "$hook"
 
-    local hook_json='{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Edit|Write|WebFetch|NotebookEdit",
-        "command": "'"$hook"'"
-      }
-    ]
-  }
-}'
+    # Hook entry using the correct Claude Code settings schema
+    local hook_entry
+    hook_entry=$(cat <<EOFJSON
+{
+  "matcher": "Bash|Edit|Write|WebFetch|NotebookEdit",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "$hook",
+      "timeout": 30
+    }
+  ]
+}
+EOFJSON
+)
 
     if [[ -f "$settings" ]]; then
         if grep -q "claude-overlay" "$settings" 2>/dev/null; then
             success "Hook already in settings.json"
+        elif command -v jq &>/dev/null; then
+            # Merge hook into existing settings using jq
+            local tmp="$settings.tmp"
+            jq --argjson entry "$hook_entry" '
+                .hooks //= {} |
+                .hooks.PreToolUse //= [] |
+                .hooks.PreToolUse += [$entry]
+            ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+            success "Merged hook into existing settings.json"
         else
-            warn "Existing settings.json - add manually:"
+            warn "Existing settings.json found but jq not available for auto-merge."
+            warn "Add the following to the \"hooks\" section of $settings:"
             echo ""
-            echo "$hook_json"
+            echo '  "hooks": {'
+            echo '    "PreToolUse": ['
+            echo "      $hook_entry"
+            echo '    ]'
+            echo '  }'
             echo ""
         fi
     else
-        echo "$hook_json" > "$settings"
+        # Create new settings.json with just the hook
+        cat > "$settings" <<EOFSETTINGS
+{
+  "hooks": {
+    "PreToolUse": [
+      $hook_entry
+    ]
+  }
+}
+EOFSETTINGS
         success "Created $settings"
     fi
 }
@@ -303,6 +339,7 @@ main() {
     check_swift
     check_node
     check_claude
+    check_jq
     echo ""
 
     install_source
